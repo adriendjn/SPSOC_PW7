@@ -110,7 +110,7 @@ static void entry_task() {
     taskman_spawn(&up_task, (void*)0, 1ull << 10);
     printf("[ t = %10u ms ] %s: blocking all up_task's for 2 seconds\n", taskman_tick_now(), __func__);
 
-    taskman_tick_wait_for(2000);
+    taskman_tick_wait_for(10000);
 
     taskman_semaphore_down(&s);
     taskman_semaphore_down(&s);

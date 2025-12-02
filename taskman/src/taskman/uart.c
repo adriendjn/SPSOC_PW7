@@ -93,6 +93,7 @@ static int on_wait(struct taskman_handler* handler, void* stack, void* arg) {
     return 0;
 }
 
+
 static int can_resume(struct taskman_handler* handler, void* stack, void* arg) {
     UNUSED(handler);
 
@@ -101,15 +102,34 @@ static int can_resume(struct taskman_handler* handler, void* stack, void* arg) {
 
     // Check if the UART buffer has data.
     // If that is the case, extract data and write it to wait_data->buffer.
-    // I strongly suggest that you first read `struct wait_data` definition.
+    // I strongly suggest that you first read struct wait_data definition.
     // Can resume if either (1) buffer is full, (2) found a new line character
     //
     // Note: that we need to put a '\0' at the end of the line.
     // Note: do not write the new line character
+    die_if_not(wait_data != NULL);
 
+    while(uart_buffer_nonempty(uart_buffer) && wait_data->length < wait_data->buffer_capacity - 1) {
+        uint8_t ch = uart_buffer_pop(uart_buffer);
+        if (ch == '\r') {
+            continue;
+        }
+        else if (ch == '\n') {
+            wait_data->buffer[wait_data->length] = '\0';
+            uart_handler.stack = NULL;
+            return 1;
+        } else {
+            wait_data->buffer[wait_data->length] = ch;
+            wait_data->length++;
+        }
+    }
+    if (wait_data->length >= wait_data->buffer_capacity - 1 && wait_data->buffer_capacity > 0){
+        wait_data->buffer[wait_data->length] = '\0';
+        uart_handler.stack = NULL;
+        return 1;
+    }
 
-    IMPLEMENT_ME;
-}
+    return 0;}
 
 static void loop(struct taskman_handler* handler) {
     UNUSED(handler);
@@ -121,8 +141,10 @@ static void loop(struct taskman_handler* handler) {
     // You can discard data if the buffer is full.
     // see: support/src/uart.c for help.
 
-
-    IMPLEMENT_ME;
+    while (uart_buffer_nonfull(uart_buffer) && (uart[UART_LINE_STATUS_REGISTER] & UART_RX_AVAILABLE_MASK) != 0) {
+        uint8_t ch = (uint8_t)uart[0]; 
+        uart_buffer_put(uart_buffer, (uint8_t)ch);
+    }
 }
 
 void taskman_uart_glinit() {

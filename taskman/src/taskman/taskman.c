@@ -80,21 +80,73 @@ void* taskman_spawn(coro_fn_t coro_fn, void* arg, size_t stack_sz) {
     // (2) initialize the coroutine and struct task_data
     // (3) register the coroutine in the tasks array
     // use die_if_not() statements to handle error conditions (like no memory)
+    size_t align = sizeof(void*);
+    size_t stack_sz_aligned = ((stack_sz + align - 1) / align) * align;
+    size_t offset = ((taskman.stack_offset + align - 1) / align) * align;
+    // Pre-conditions check
+    die_if_not(coro_fn != NULL);
+    die_if_not(stack_sz > 0);
+    die_if_not(stack_sz_aligned <= TASKMAN_STACK_SIZE - offset);
+    die_if_not(taskman.tasks_count < TASKMAN_NUM_TASKS);
 
+    void* stack = (void*)&taskman.stack[offset];
+    coro_init(stack, stack_sz_aligned, coro_fn, arg);
 
-    IMPLEMENT_ME;
+    struct task_data* td = (struct task_data*) coro_data(stack);
+    td->wait.handler = NULL;
+    td->wait.arg = NULL;
+    td->running = 0;
+
+    taskman.tasks[taskman.tasks_count] = stack;
+    taskman.tasks_count++;
+
+    taskman.stack_offset = offset + stack_sz_aligned;
+    return stack;
 }
 
 void taskman_loop() {
-    // (a) Call the `loop` functions of all the wait handlers.
+    // (a) Call the loop functions of all the wait handlers.
     // (b) Iterate over all the tasks, and resume them if.
     //        * The task is not complete.
-    //        * it yielded using `taskman_yield`.
+    //        * it yielded using taskman_yield.
     //        * the waiting handler says it can be resumed.
 
-    while (!taskman.should_stop) {
+    while(!taskman.should_stop) {
+        for (size_t h = 0; h < taskman.handlers_count; ++h){
+            struct taskman_handler* handler = taskman.handlers[h];
+            if (handler->loop != NULL){
+                handler->loop(handler);
+            }
+        }
 
-        IMPLEMENT_ME;
+        for (size_t i = 0; i < taskman.tasks_count; ++i) {
+            void* task = taskman.tasks[i];
+            if (task == NULL) continue;
+
+            void* result = NULL;
+            if (coro_completed(task, &result)) {
+                taskman.tasks_count--;
+                if (i < taskman.tasks_count) {
+                    taskman.tasks[i] = taskman.tasks[taskman.tasks_count];
+                    i--;
+                }
+                continue;
+            }
+            struct task_data* td = (struct task_data*) coro_data(task);
+
+            if (td->running) continue;
+
+            if (td->wait.handler != NULL) {
+                if (td->wait.handler->can_resume == NULL || !td->wait.handler->can_resume(td->wait.handler, task, td->wait.arg)){
+                    continue;
+                }
+                td->wait.handler = NULL;
+                td->wait.arg = NULL;
+            }
+            td->running = 1;
+            coro_resume(task);
+            td->running = 0;
+        }
     }
 }
 
@@ -116,13 +168,28 @@ void taskman_wait(struct taskman_handler* handler, void* arg) {
     void* stack = coro_stack();
     struct task_data* task_data = coro_data(stack);
 
-    // I suggest that you read `struct taskman_handler` definition.
+    // I suggest that you read struct taskman_handler definition.
     // Call handler->on_wait, see if there is a need to yield.
     // Update the wait field of the task_data.
     // Yield if necessary.
-
-
-    IMPLEMENT_ME;
+    if (handler == NULL) {
+        task_data->wait.handler = NULL;
+        task_data->wait.arg = NULL;
+        coro_yield();
+        return;
+    }
+    int do_continue = 1;
+    if (handler->on_wait){
+        do_continue = handler->on_wait(handler, stack, arg);
+    }
+    if (!do_continue) {
+        task_data->wait.handler = handler;
+        task_data->wait.arg = arg;
+        coro_yield();
+        return;
+    }
+    task_data->wait.handler = NULL;
+    task_data->wait.arg = NULL;
 }
 
 void taskman_yield() {

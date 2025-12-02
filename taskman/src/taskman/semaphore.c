@@ -10,6 +10,8 @@ struct wait_data {
     // to be passed as an argument.
     // what kind of data do we need to put here
     // so that the semaphore works correctly?
+    struct taskman_semaphore* semaphore;
+    int up; //1 =
 
 };
 
@@ -17,8 +19,21 @@ static int impl(struct wait_data* wait_data) {
     // implement the semaphore logic here
     // do not forget to check the header file
 
+    die_if_not(wait_data != NULL);
+    struct taskman_semaphore* semaphore = wait_data->semaphore;
+    die_if_not(semaphore != NULL);
 
-    IMPLEMENT_ME;
+    if (wait_data->up){
+        if (semaphore->count < semaphore->max) {
+            semaphore->count++;
+            return 1;
+        } return 0;
+    } else {
+        if (semaphore->count > 0){
+            semaphore->count--;
+            return 1;
+        } return 0;
+    }
 }
 
 static int on_wait(struct taskman_handler* handler, void* stack, void* arg) {
@@ -61,10 +76,19 @@ void taskman_semaphore_init(
 
 void __no_optimize taskman_semaphore_down(struct taskman_semaphore* semaphore) {
 
-    IMPLEMENT_ME;
+    die_if_not(semaphore != NULL);
+
+    struct wait_data wd;
+    wd.semaphore = semaphore;
+    wd.up = 0;
+    taskman_wait(&semaphore_handler, &wd);
 }
 
 void __no_optimize taskman_semaphore_up(struct taskman_semaphore* semaphore) {
 
-    IMPLEMENT_ME;
+    die_if_not(semaphore != NULL);
+    struct wait_data wd;
+    wd.semaphore = semaphore;
+    wd.up = 1;
+    taskman_wait(&semaphore_handler, &wd);
 }
