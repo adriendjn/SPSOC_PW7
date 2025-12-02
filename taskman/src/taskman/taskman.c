@@ -97,10 +97,11 @@ void* taskman_spawn(coro_fn_t coro_fn, void* arg, size_t stack_sz) {
     td->wait.arg = NULL;
     td->running = 0;
 
+    TASKMAN_LOCK();
     taskman.tasks[taskman.tasks_count] = stack;
     taskman.tasks_count++;
-
     taskman.stack_offset = offset + stack_sz_aligned;
+    TASKMAN_RELEASE();
     return stack;
 }
 
@@ -112,6 +113,7 @@ void taskman_loop() {
     //        * the waiting handler says it can be resumed.
 
     while(!taskman.should_stop) {
+        TASKMAN_LOCK();
         for (size_t h = 0; h < taskman.handlers_count; ++h){
             struct taskman_handler* handler = taskman.handlers[h];
             if (handler->loop != NULL){
@@ -144,9 +146,12 @@ void taskman_loop() {
                 td->wait.arg = NULL;
             }
             td->running = 1;
+            TASKMAN_RELEASE();
             coro_resume(task);
+            TASKMAN_LOCK();
             td->running = 0;
         }
+    TASKMAN_RELEASE();
     }
 }
 
@@ -160,8 +165,10 @@ void taskman_register(struct taskman_handler* handler) {
     die_if_not(handler != NULL);
     die_if_not(taskman.handlers_count < TASKMAN_NUM_HANDLERS);
 
+    TASKMAN_LOCK();
     taskman.handlers[taskman.handlers_count] = handler;
     taskman.handlers_count++;
+    TASKMAN_RELEASE();
 }
 
 void taskman_wait(struct taskman_handler* handler, void* arg) {
@@ -173,11 +180,15 @@ void taskman_wait(struct taskman_handler* handler, void* arg) {
     // Update the wait field of the task_data.
     // Yield if necessary.
     if (handler == NULL) {
+        TASKMAN_LOCK();
         task_data->wait.handler = NULL;
         task_data->wait.arg = NULL;
+        TASKMAN_RELEASE();
         coro_yield();
         return;
     }
+    TASKMAN_LOCK();
+
     int do_continue = 1;
     if (handler->on_wait){
         do_continue = handler->on_wait(handler, stack, arg);
@@ -185,11 +196,14 @@ void taskman_wait(struct taskman_handler* handler, void* arg) {
     if (!do_continue) {
         task_data->wait.handler = handler;
         task_data->wait.arg = arg;
+        TASKMAN_RELEASE();
         coro_yield();
         return;
     }
     task_data->wait.handler = NULL;
     task_data->wait.arg = NULL;
+    TASKMAN_RELEASE();
+
 }
 
 void taskman_yield() {
